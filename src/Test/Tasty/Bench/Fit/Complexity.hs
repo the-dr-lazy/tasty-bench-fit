@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- | Guess complexity from data.
@@ -23,6 +24,10 @@ import Text.Printf (printf)
 import Prelude hiding (log)
 import qualified Prelude as P
 
+#ifdef DEBUG
+import Debug.Trace
+#endif
+
 log :: Double -> Double
 log x = if x > 1 then P.log x else 0
 
@@ -31,8 +36,11 @@ avg xs = a / b
   where
     (a, b) = foldl' (\(acc, len) x -> (acc + x, len + 1)) (0, 0) xs
 
+stdev :: [Double] -> Double
+stdev xs = sqrt $ (/ fromIntegral (length xs)) $ sum $ map (\x -> (x - avg xs) ** 2) xs
+
 -- | 'Complexity' @a@ @b@ @c@ represents a time complexity
--- \( a x^b \log^c x \), where \( x \) is problem's size.
+-- \( a \, x^b \log^c x \), where \( x \) is problem's size.
 data Complexity = Complexity
   { cmplMultiplier :: Double
   , cmplVarPower :: Double
@@ -123,11 +131,18 @@ bestOf cs xys = minimumBy (comparing weigh) cs
     weigh cmpl@(Complexity _ b c) =
       wssrComplexity cmpl xys
         -- Penalty for non-integer power. Just fine-tuned magic numbers.
-        * (if b == b' then 1 else (if b <= 1 then 7 else 12))
+        * (if b == b' then 1 else (if b <= 1 then 7 else 14))
         -- Penalty for high power of logarithm.
         * (max 1 (c - 1))
       where
         b' = fromIntegral (round b :: Int)
+
+stdevComplexity :: [Complexity] -> Complexity
+stdevComplexity cs = Complexity
+  { cmplMultiplier = stdev $ map cmplMultiplier cs
+  , cmplVarPower   = stdev $ map cmplVarPower   cs
+  , cmplLogPower   = stdev $ map cmplLogPower   cs
+  }
 
 -- | Guess time complexity from a list of pairs, where the first component
 -- is problem's size and the second component is problem's time.
@@ -136,8 +151,32 @@ bestOf cs xys = minimumBy (comparing weigh) cs
 -- 0.9928 * x ^ 2
 -- >>> guessComplexity [(1e2, 2.1), (1e3, 2.9), (1e4, 4.1), (1e5, 4.9)]
 -- 0.4327 * log x
+--
+-- This functions uses following simplifying assumptions:
+--
+-- * All coefficients are non-negative.
+-- * The power of \( \log x \) ('cmplLogPower') is an integer.
+-- * The power of \( x \) ('cmplVarPower') is unlikely to be close to integer fractional number such as 0.9 or 2.1.
+--
+-- This function is unsuitable to guess
+-- [superpolynomial](https://en.wikipedia.org/wiki/Time_complexity#Superpolynomial_time)
+-- and higher classes of complexity.
 guessComplexity :: [(Double, Double)] -> Complexity
-guessComplexity xys = guessComplexityFromInit start xys
+guessComplexity = fst . guessComplexityInterval
+
+guessComplexityInterval :: [(Double, Double)] -> (Complexity, Complexity)
+guessComplexityInterval xs =
+  ( guessSingleComplexity xs
+  , stdevComplexity $ bootstrapComplexities xs
+  )
+
+bootstrapComplexities :: [(Double, Double)] -> [Complexity]
+bootstrapComplexities xs = map guessSingleComplexity xss
+  where
+    xss = map (\i -> let (ys, zs) = splitAt i xs in ys <> drop 1 zs) [0 .. length xs - 1]
+
+guessSingleComplexity :: [(Double, Double)] -> Complexity
+guessSingleComplexity xys = guessComplexityFromInit start xys
   where
     start = V3 (avg (map snd xys)) 0 0
 
@@ -190,9 +229,19 @@ guessComplexityForFixedPow (V3 _ b initC) xys = fits
 -- or equivalently a = \sum_i f(x_i) y_i / \sum_i x_i^2.
 guessComplexityForFixedPowAndLog :: V3 -> [(Double, Double)] -> Complexity
 guessComplexityForFixedPowAndLog (V3 _ b c) xys =
-  fromV3 (V3 fitA b c)
+  trace'
+    ("guessComplexityForFixedPowAndLog " <> show res <> ", RSS " <> show (wssrComplexity res xys))
+    res
   where
     eval x = evalComplexity (fromV3 (V3 1 b c)) x
     sumXY = sum $ map (\(x, y) -> eval x * y) xys
     sumX2 = sum $ map (\(x, _) -> eval x ** 2) xys
     fitA = sumXY / sumX2
+    res = fromV3 (V3 fitA b c)
+
+trace' :: String -> b -> b
+#ifdef DEBUG
+trace' = trace
+#else
+trace' = const id
+#endif
