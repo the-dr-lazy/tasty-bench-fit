@@ -232,19 +232,14 @@ guessComplexityForFixedPow (V3 initA b initC) xys =
           (V2 initA initC)
           xys
 
+-- We want to find a which minimizes \sum_i (y_i - a f(x_i))^2 for f(x) = x^b * log^c x.
+-- Then d/da = 0 means that \sum_i (2 a f(x_i)^2 - 2 f(x_i) y_i) = 0
+-- or equivalently a = \sum_i f(x_i) y_i / \sum_i x_i^2.
 guessComplexityForFixedPowAndLog :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityForFixedPowAndLog (V3 initA b c) xys =
+guessComplexityForFixedPowAndLog (V3 _ b c) xys =
   fromV3 (V3 fitA b c)
   where
-    Fit {fitParams = fitA} =
-      NE.last $
-        levenbergMarquardt1
-          ( \a (x, y) ->
-              let v3 = V3 a b c
-               in ( y
-                  , evalComplexity (fromV3 v3) x
-                  , let (V3 da _ _) = diffAsComplexity v3 x in da
-                  )
-          )
-          initA
-          xys
+    eval x = evalComplexity (fromV3 (V3 1 b c)) x
+    sumXY = sum $ map (\(x, y) -> eval x * y) xys
+    sumX2 = sum $ map (\(x, _) -> eval x ** 2) xys
+    fitA = sumXY / sumX2
