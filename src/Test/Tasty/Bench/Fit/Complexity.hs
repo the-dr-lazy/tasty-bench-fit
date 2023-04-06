@@ -140,34 +140,14 @@ coarsenPower orig@(Complexity a b c)
 -- >>> guessComplexity [(1e2, 2.1), (1e3, 2.9), (1e4, 4.1), (1e5, 4.9)]
 -- 0.4327 * log x
 guessComplexity :: [(Double, Double)] -> Complexity
-guessComplexity xys = bestOf fits xys
+guessComplexity xys = guessComplexityFromInit start xys
   where
-    starts =
-      [ let initA = avg (map snd xys)
-         in V3 initA 0 0
-      , let V2 initA _ = linear (\(x, y) -> (log x, y)) xys
-         in V3 initA 0 1
-      , let V2 initA _ = linear (\(x, y) -> ((log x) ** 2, y)) xys
-         in V3 initA 0 2
-      , let V2 initA _ = linear id xys
-         in V3 initA 1 0
-      , let V2 initA _ = linear (\(x, y) -> (x * log x, y)) xys
-         in V3 initA 1 1
-      , let V2 initA _ = linear (\(x, y) -> (x * (log x) ** 2, y)) xys
-         in V3 initA 1 2
-      , let V2 initA _ = linear (\(x, y) -> (x ** 2, y)) xys
-         in V3 initA 2 0
-      , let V2 initA _ = linear (\(x, y) -> (x ** 2 * log x, y)) xys
-         in V3 initA 2 1
-      , let V2 initA _ = linear (\(x, y) -> (x ** 2 * (log x) ** 2, y)) xys
-         in V3 initA 2 2
-      ]
-    fits = map (\v3 -> guessComplexityFromInit v3 xys) starts
+    start = V3 (avg (map snd xys)) 0 0
 
 guessComplexityFromInit :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityFromInit initV3 xys = bestOf powFits xys
+guessComplexityFromInit start xys = tryToImprovePow (fromV3 finish) xys
   where
-    initFit =
+    Fit {fitParams = finish} =
       NE.last $
         levenbergMarquardt3
           ( \v3 (x, y) ->
@@ -176,16 +156,13 @@ guessComplexityFromInit initV3 xys = bestOf powFits xys
               , diffAsComplexity v3 x
               )
           )
-          initV3
+          start
           xys
 
-    initCmpl = fromV3 $ fitParams initFit
-    powFits = tryToImprovePow initCmpl xys
-
 -- Power of the main term is likely an integer
-tryToImprovePow :: Complexity -> [(Double, Double)] -> [Complexity]
+tryToImprovePow :: Complexity -> [(Double, Double)] -> Complexity
 tryToImprovePow (Complexity origA origB origC) xys =
-  [origFit', floorFit, ceilingFit]
+  bestOf [origFit', floorFit, ceilingFit] xys
   where
     origFit = coarsenPower $ guessComplexityForFixedPow (V3 origA origB origC) xys
     origFit' = guessComplexityForFixedPowAndLog (toV3 origFit) xys
@@ -201,16 +178,18 @@ guessComplexityForFixedPow (V3 _ b initC) xys = bestOf fits xys
       , goDown (fromIntegral (floor initC :: Int))
       ]
 
-    goUp c = if wssrComplexity curr xys > wssrComplexity next xys
-      then goUp (c + 1)
-      else curr
+    goUp c =
+      if wssrComplexity curr xys > wssrComplexity next xys
+        then goUp (c + 1)
+        else curr
       where
         curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
         next = guessComplexityForFixedPowAndLog (V3 1 b (c + 1)) xys
 
-    goDown c = if c > 0 && wssrComplexity curr xys > wssrComplexity next xys
-      then goDown (c - 1)
-      else curr
+    goDown c =
+      if c > 0 && wssrComplexity curr xys > wssrComplexity next xys
+        then goDown (c - 1)
+        else curr
       where
         curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
         next = guessComplexityForFixedPowAndLog (V3 1 b (c - 1)) xys
