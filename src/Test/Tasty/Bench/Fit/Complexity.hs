@@ -120,6 +120,9 @@ wssrComplexity :: Complexity -> [(Double, Double)] -> Double
 wssrComplexity cmpl xys =
   sum $ map (\(x, y) -> (y - evalComplexity cmpl x) ^ (2 :: Int)) xys
 
+bestOf :: [Complexity] -> [(Double, Double)] -> Complexity
+bestOf cs xys = minimumBy (comparing (\cmpl -> wssrComplexity cmpl xys)) cs
+
 coarsenPower :: Complexity -> Complexity
 coarsenPower orig@(Complexity a b c)
   | abs (b - b') < 0.1 = Complexity a b' c
@@ -137,7 +140,7 @@ coarsenPower orig@(Complexity a b c)
 -- >>> guessComplexity [(1e2, 2.1), (1e3, 2.9), (1e4, 4.1), (1e5, 4.9)]
 -- 0.4327 * log x
 guessComplexity :: [(Double, Double)] -> Complexity
-guessComplexity xys = minimumBy (comparing (\cmpl -> wssrComplexity cmpl xys)) fits
+guessComplexity xys = bestOf fits xys
   where
     starts =
       [ let initA = avg (map snd xys)
@@ -162,7 +165,7 @@ guessComplexity xys = minimumBy (comparing (\cmpl -> wssrComplexity cmpl xys)) f
     fits = map (\v3 -> guessComplexityFromInit v3 xys) starts
 
 guessComplexityFromInit :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityFromInit initV3 xys = bestFit
+guessComplexityFromInit initV3 xys = bestOf powFits xys
   where
     initFit =
       NE.last $
@@ -176,61 +179,41 @@ guessComplexityFromInit initV3 xys = bestFit
           initV3
           xys
 
-    initCmpl = normalizeComplexity $ fromV3 $ fitParams initFit
+    initCmpl = fromV3 $ fitParams initFit
     powFits = tryToImprovePow initCmpl xys
-    logFits = concatMap (\f -> tryToImproveLog f xys) powFits
-    coarseFits = map ((\f -> guessComplexityForFixedPowAndLog (toV3 f) xys) . coarsenPower) logFits
-    bestFit = minimumBy (comparing (\cmpl -> wssrComplexity cmpl xys)) coarseFits
-
--- Power of the logarithmic term is always an integer
-tryToImproveLog :: Complexity -> [(Double, Double)] -> [Complexity]
-tryToImproveLog (Complexity origA origB origC) xys =
-  [floorFit, ceilingFit]
-  where
-    floorFit = guessComplexityForFixedLog (V3 origA origB (fromIntegral (floor origC :: Int))) xys
-    ceilingFit = guessComplexityForFixedLog (V3 origA origB (fromIntegral (ceiling origC :: Int))) xys
 
 -- Power of the main term is likely an integer
 tryToImprovePow :: Complexity -> [(Double, Double)] -> [Complexity]
-tryToImprovePow origFit@(Complexity origA origB origC) xys =
-  [origFit, floorFit, ceilingFit]
+tryToImprovePow (Complexity origA origB origC) xys =
+  [origFit', floorFit, ceilingFit]
   where
+    origFit = coarsenPower $ guessComplexityForFixedPow (V3 origA origB origC) xys
+    origFit' = guessComplexityForFixedPowAndLog (toV3 origFit) xys
     floorFit = guessComplexityForFixedPow (V3 origA (fromIntegral (floor origB :: Int)) origC) xys
     ceilingFit = guessComplexityForFixedPow (V3 origA (fromIntegral (ceiling origB :: Int)) origC) xys
 
-guessComplexityForFixedLog :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityForFixedLog (V3 initA initB c) xys =
-  fromV3 (V3 fitA fitB c)
-  where
-    Fit {fitParams = V2 fitA fitB} =
-      NE.last $
-        levenbergMarquardt2
-          ( \(V2 a b) (x, y) ->
-              let v3 = V3 a b c
-               in ( y
-                  , evalComplexity (fromV3 v3) x
-                  , let (V3 da db _) = diffAsComplexity (V3 a b c) x in V2 da db
-                  )
-          )
-          (V2 initA initB)
-          xys
-
 guessComplexityForFixedPow :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityForFixedPow (V3 initA b initC) xys =
-  fromV3 (V3 fitA b fitC)
+guessComplexityForFixedPow (V3 _ b initC) xys = bestOf fits xys
   where
-    Fit {fitParams = V2 fitA fitC} =
-      NE.last $
-        levenbergMarquardt2
-          ( \(V2 a c) (x, y) ->
-              let v3 = V3 a b c
-               in ( y
-                  , evalComplexity (fromV3 v3) x
-                  , let (V3 da _ dc) = diffAsComplexity v3 x in V2 da dc
-                  )
-          )
-          (V2 initA initC)
-          xys
+    -- Power of the logarithmic term is always an integer
+    fits =
+      [ goUp (fromIntegral (ceiling initC :: Int))
+      , goDown (fromIntegral (floor initC :: Int))
+      ]
+
+    goUp c = if wssrComplexity curr xys > wssrComplexity next xys
+      then goUp (c + 1)
+      else curr
+      where
+        curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
+        next = guessComplexityForFixedPowAndLog (V3 1 b (c + 1)) xys
+
+    goDown c = if c > 0 && wssrComplexity curr xys > wssrComplexity next xys
+      then goDown (c - 1)
+      else curr
+      where
+        curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
+        next = guessComplexityForFixedPowAndLog (V3 1 b (c - 1)) xys
 
 -- We want to find a which minimizes \sum_i (y_i - a f(x_i))^2 for f(x) = x^b * log^c x.
 -- Then d/da = 0 means that \sum_i (2 a f(x_i)^2 - 2 f(x_i) y_i) = 0
