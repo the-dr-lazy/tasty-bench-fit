@@ -76,9 +76,6 @@ isCubic = \case
   Complexity _ 3 0 -> True
   _ -> False
 
-toV3 :: Complexity -> V3
-toV3 (Complexity a b c) = V3 a b c
-
 fromV3 :: V3 -> Complexity
 fromV3 (V3 a b c) = normalizeComplexity (Complexity a b c)
 
@@ -121,16 +118,14 @@ wssrComplexity cmpl xys =
   sum $ map (\(x, y) -> (y - evalComplexity cmpl x) ^ (2 :: Int)) xys
 
 bestOf :: [Complexity] -> [(Double, Double)] -> Complexity
-bestOf cs xys = minimumBy (comparing (\cmpl -> wssrComplexity cmpl xys)) cs
-
-coarsenPower :: Complexity -> Complexity
-coarsenPower orig@(Complexity a b c)
-  | abs (b - b') < 0.1 = Complexity a b' c
-  | b' > b && b' - b < 0.16 && c > 0 = Complexity a b' (c - 1)
-  | b > b' && b - b' < 0.16 = Complexity a b' (c + 1)
-  | otherwise = orig
+bestOf cs xys = minimumBy (comparing weigh) cs
   where
-    b' = fromIntegral (round b :: Int)
+    weigh cmpl@(Complexity _ b _) =
+      wssrComplexity cmpl xys
+        -- Penalty for non-integer power. Just fine-tuned magic numbers.
+        * (if b == b' then 1 else (if b <= 1 then 7 else 12))
+      where
+        b' = fromIntegral (round b :: Int)
 
 -- | Guess time complexity from a list of pairs, where the first component
 -- is problem's size and the second component is problem's time.
@@ -162,10 +157,9 @@ guessComplexityFromInit start xys = tryToImprovePow (fromV3 finish) xys
 -- Power of the main term is likely an integer
 tryToImprovePow :: Complexity -> [(Double, Double)] -> Complexity
 tryToImprovePow (Complexity origA origB origC) xys =
-  bestOf [origFit', floorFit, ceilingFit] xys
+  bestOf [origFit, floorFit, ceilingFit] xys
   where
-    origFit = coarsenPower $ guessComplexityForFixedPow (V3 origA origB origC) xys
-    origFit' = guessComplexityForFixedPowAndLog (toV3 origFit) xys
+    origFit = guessComplexityForFixedPow (V3 origA origB origC) xys
     floorFit = guessComplexityForFixedPow (V3 origA (fromIntegral (floor origB :: Int)) origC) xys
     ceilingFit = guessComplexityForFixedPow (V3 origA (fromIntegral (ceiling origB :: Int)) origC) xys
 
@@ -174,10 +168,10 @@ guessComplexityForFixedPow (V3 _ b initC) xys = bestOf fits xys
   where
     -- Power of the logarithmic term is always an integer
     fits =
-      [ let c = fromIntegral (ceiling initC :: Int) in
-        findFirstLocalMin (c NE.:| [c + 1, c + 2 ..])
-      , let f = fromIntegral (floor initC :: Int) in
-        findFirstLocalMin (f NE.:| [f - 1, f - 2 .. 0])
+      [ let c = fromIntegral (ceiling initC :: Int)
+         in findFirstLocalMin (c NE.:| [c + 1, c + 2 ..])
+      , let f = fromIntegral (floor initC :: Int)
+         in findFirstLocalMin (f NE.:| [f - 1, f - 2 .. 0])
       ]
 
     findFirstLocalMin cs = go cmpl cmpls
