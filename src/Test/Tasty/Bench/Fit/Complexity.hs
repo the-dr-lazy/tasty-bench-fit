@@ -174,25 +174,20 @@ guessComplexityForFixedPow (V3 _ b initC) xys = bestOf fits xys
   where
     -- Power of the logarithmic term is always an integer
     fits =
-      [ goUp (fromIntegral (ceiling initC :: Int))
-      , goDown (fromIntegral (floor initC :: Int))
+      [ let c = fromIntegral (ceiling initC :: Int) in
+        findFirstLocalMin (c NE.:| [c + 1, c + 2 ..])
+      , let f = fromIntegral (floor initC :: Int) in
+        findFirstLocalMin (f NE.:| [f - 1, f - 2 .. 0])
       ]
 
-    goUp c =
-      if wssrComplexity curr xys > wssrComplexity next xys
-        then goUp (c + 1)
-        else curr
+    findFirstLocalMin cs = go cmpl cmpls
       where
-        curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
-        next = guessComplexityForFixedPowAndLog (V3 1 b (c + 1)) xys
+        cmpl NE.:| cmpls = fmap (\c -> guessComplexityForFixedPowAndLog (V3 1 b c) xys) cs
 
-    goDown c =
-      if c > 0 && wssrComplexity curr xys > wssrComplexity next xys
-        then goDown (c - 1)
-        else curr
-      where
-        curr = guessComplexityForFixedPowAndLog (V3 1 b c) xys
-        next = guessComplexityForFixedPowAndLog (V3 1 b (c - 1)) xys
+        go curr [] = curr
+        go curr (next : rest)
+          | wssrComplexity curr xys > wssrComplexity next xys = go next rest
+          | otherwise = curr
 
 -- We want to find a which minimizes \sum_i (y_i - a f(x_i))^2 for f(x) = x^b * log^c x.
 -- Then d/da = 0 means that \sum_i (2 a f(x_i)^2 - 2 f(x_i) y_i) = 0
