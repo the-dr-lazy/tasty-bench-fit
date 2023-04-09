@@ -120,10 +120,12 @@ wssrComplexity cmpl xys =
 bestOf :: [Complexity] -> [(Double, Double)] -> Complexity
 bestOf cs xys = minimumBy (comparing weigh) cs
   where
-    weigh cmpl@(Complexity _ b _) =
+    weigh cmpl@(Complexity _ b c) =
       wssrComplexity cmpl xys
         -- Penalty for non-integer power. Just fine-tuned magic numbers.
         * (if b == b' then 1 else (if b <= 1 then 7 else 12))
+        -- Penalty for high power of logarithm.
+        * (max 1 (c - 1))
       where
         b' = fromIntegral (round b :: Int)
 

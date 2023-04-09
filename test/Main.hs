@@ -14,8 +14,15 @@ main = defaultMain $ testGroup "All"
   [ testShow
   , testGuess
   , testProperty "sum is linear" $ ioProperty $ do
-    c <- fit $ mkFitConfig (\n -> sum [1..100*n]) (1, 10)
-    pure $ isLinear c
+    c <- fit $ mkFitConfig (\x -> sum [1..x]) (10, 1000)
+    pure $ counterexample (show c) $ isLinear c
+  -- , expectFail $ testProperty "nub is quadratic" $ ioProperty $ do
+  --   c <- fit $ mkFitConfig (\x -> nub [1..x]) (10, 1000)
+  --   pure $ counterexample (show c) $ isQuadratic c
+  -- , expectFail $ testProperty "sort is linearithmic" $ ioProperty $ do
+  --   c <- fit $ mkFitConfig (\x -> Data.List.sort $ take x $
+  --     iterate (\n -> n * 6364136223846793005 + 1) (1 :: Int)) (10, 1000)
+  --   pure $ counterexample (show c) $ isLinearithmic c
   ]
 
 testShow :: TestTree
