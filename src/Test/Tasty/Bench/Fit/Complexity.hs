@@ -159,14 +159,14 @@ guessComplexityFromInit start xys = tryToImprovePow (fromV3 finish) xys
 -- Power of the main term is likely an integer
 tryToImprovePow :: Complexity -> [(Double, Double)] -> Complexity
 tryToImprovePow (Complexity origA origB origC) xys =
-  bestOf [origFit, floorFit, ceilingFit] xys
+  bestOf (origFit <> floorFit <> ceilingFit) xys
   where
     origFit = guessComplexityForFixedPow (V3 origA origB origC) xys
     floorFit = guessComplexityForFixedPow (V3 origA (fromIntegral (floor origB :: Int)) origC) xys
     ceilingFit = guessComplexityForFixedPow (V3 origA (fromIntegral (ceiling origB :: Int)) origC) xys
 
-guessComplexityForFixedPow :: V3 -> [(Double, Double)] -> Complexity
-guessComplexityForFixedPow (V3 _ b initC) xys = bestOf fits xys
+guessComplexityForFixedPow :: V3 -> [(Double, Double)] -> [Complexity]
+guessComplexityForFixedPow (V3 _ b initC) xys = fits
   where
     -- Power of the logarithmic term is always an integer
     fits =
